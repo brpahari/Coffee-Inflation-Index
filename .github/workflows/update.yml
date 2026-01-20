@@ -1,0 +1,40 @@
+name: Monthly Index Update
+
+on:
+  schedule:
+    - cron: "0 14 15 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate series
+        env:
+          BLS_API_KEY: ${{ secrets.BLS_API_KEY }}
+        run: python validate_series.py
+
+      - name: Build index
+        env:
+          BLS_API_KEY: ${{ secrets.BLS_API_KEY }}
+        run: python build_index.py
+
+      - name: Commit update
+        run: |
+          git config user.name "IndexBot"
+          git config user.email "bot@noreply.github.com"
+          git add data.json
+          git commit -m "Automated update $(date -u +'%Y-%m-%d')" || exit 0
+          git push
