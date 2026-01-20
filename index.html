@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Independent Coffee Shop Index</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      max-width: 980px;
+      margin: 28px auto;
+      padding: 0 16px;
+    }
+    h1 { margin-bottom: 6px; }
+    .muted { color: #666; font-size: 14px; line-height: 1.4; }
+    .card {
+      border: 1px solid #e6e6e6;
+      border-radius: 14px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+    .pill {
+      border: 1px solid #e6e6e6;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Independent Coffee Shop Index</h1>
+  <p class="muted" id="meta"></p>
+
+  <div class="card">
+    <canvas id="chart" height="120"></canvas>
+    <p class="muted" id="insight"></p>
+    <div class="row" id="weights"></div>
+  </div>
+
+  <script>
+    function last(arr){ return arr[arr.length - 1]; }
+
+    async function main(){
+      const res = await fetch("./data.json", { cache: "no-store" });
+      const data = await res.json();
+
+      const labels = data.labels;
+      const cafe   = data.cafe_index;
+      const cpi    = data.cpi_index;
+
+      const base = data.meta.base_date;
+      const latest = data.meta.latest_common_month;
+
+      const cafeUp = last(cafe) - 100;
+      const cpiUp  = last(cpi) - 100;
+      const gap    = last(cafe) - last(cpi);
+
+      document.getElementById("meta").textContent =
+        `Base month ${base}. Latest data shown ${latest}.`;
+
+      document.getElementById("insight").textContent =
+        `Since ${base}, cafe input costs are up ${cafeUp.toFixed(1)} percent while CPI is up ${cpiUp.toFixed(1)} percent. Gap ${gap.toFixed(1)} points.`;
+
+      const weights = document.getElementById("weights");
+      weights.innerHTML = "";
+      for (const s of data.series){
+        const d = document.createElement("div");
+        d.className = "pill";
+        d.textContent = `${s.name} ${Math.round(s.weight * 100)}%`;
+        weights.appendChild(d);
+      }
+
+      new Chart(document.getElementById("chart"), {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            { label: "Cafe Input Cost Index", data: cafe, tension: 0.25, pointRadius: 0 },
+            { label: "CPI-U All Items", data: cpi, tension: 0.25, pointRadius: 0 }
+          ]
+        },
+        options: {
+          interaction: { mode: "index", intersect: false },
+          plugins: { tooltip: { mode: "index", intersect: false } },
+          scales: { y: { title: { display: true, text: "Index (base = 100)" } } }
+        }
+      });
+    }
+
+    main();
+  </script>
+</body>
+</html>
