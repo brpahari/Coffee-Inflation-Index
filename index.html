@@ -14,19 +14,54 @@
       margin: 28px auto;
       padding: 0 16px;
     }
-    h1 { margin-bottom: 6px; }
-    .muted { color: #666; font-size: 14px; line-height: 1.4; }
+    h1 { margin: 0 0 8px 0; }
+    .muted { color: #666; font-size: 14px; line-height: 1.45; }
     .card {
       border: 1px solid #e6e6e6;
       border-radius: 14px;
       padding: 16px;
-      margin-top: 16px;
+      margin-top: 14px;
     }
-    .row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    @media (min-width: 900px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+    }
+    .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+    .kpi {
+      border: 1px solid #e6e6e6;
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .kpi .label { color: #666; font-size: 12px; margin-bottom: 6px; }
+    .kpi .value { font-size: 22px; font-weight: 700; }
+    .pillrow { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
     .pill {
       border: 1px solid #e6e6e6;
       border-radius: 999px;
       padding: 6px 10px;
+      font-size: 13px;
+    }
+    .small { font-size: 13px; color: #666; line-height: 1.45; }
+    .btnrow { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+    .btn {
+      display: inline-block;
+      border: 1px solid #e6e6e6;
+      border-radius: 12px;
+      padding: 10px 12px;
+      text-decoration: none;
+      color: inherit;
+      font-size: 14px;
+    }
+    .warn {
+      border: 1px solid #ffe0a3;
+      background: #fff7e6;
+      border-radius: 14px;
+      padding: 12px;
+      margin-top: 14px;
       font-size: 13px;
     }
   </style>
@@ -34,65 +69,185 @@
 
 <body>
   <h1>Independent Coffee Shop Index</h1>
-  <p class="muted" id="meta"></p>
+  <div class="muted" id="metaLine"></div>
+
+  <div class="kpis">
+    <div class="kpi">
+      <div class="label">Cafe input costs since base</div>
+      <div class="value" id="kpiCafe">--</div>
+    </div>
+    <div class="kpi">
+      <div class="label">CPI since base</div>
+      <div class="value" id="kpiCpi">--</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Cafe gap vs CPI</div>
+      <div class="value" id="kpiGap">--</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="muted" style="margin-bottom:10px;">
+        Main comparison. Both lines start at 100 in the base month.
+      </div>
+      <canvas id="chartMain" height="140"></canvas>
+      <div class="btnrow">
+        <a class="btn" href="./data.json" target="_blank" rel="noreferrer">Download data.json</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="muted" style="margin-bottom:10px;">
+        The gap chart. Positive means cafes are under more cost pressure than general inflation.
+      </div>
+      <canvas id="chartGap" height="140"></canvas>
+    </div>
+  </div>
 
   <div class="card">
-    <canvas id="chart" height="120"></canvas>
-    <p class="muted" id="insight"></p>
-    <div class="row" id="weights"></div>
+    <div class="muted" style="margin-bottom:8px;">Basket weights</div>
+    <div class="pillrow" id="weights"></div>
+    <div class="small" id="freshness"></div>
   </div>
+
+  <div class="card">
+    <div class="muted" style="margin-bottom:8px;">How to read this</div>
+    <div class="small">
+      This index estimates how key cafe inputs are changing over time using BLS price series.
+      It is a weighted blend of coffee, milk, sugar, electricity, and packaging.
+      It is not a profit or margin calculator and it will not match any one shop perfectly.
+      Use it as a neutral reference when explaining why costs and menu prices change.
+    </div>
+    <div class="small" style="margin-top:10px;">
+      Base month is the month where the index equals 100.
+      If the cafe index is 148, it means this basket of inputs is about 48 percent higher than in the base month.
+    </div>
+  </div>
+
+  <div class="warn" id="warnBox" style="display:none;"></div>
 
   <script>
     function last(arr){ return arr[arr.length - 1]; }
 
+    function fmtPct(x){
+      return `${x.toFixed(1)}%`;
+    }
+
+    function computeYoY(values){
+      if (!values || values.length < 13) return null;
+      const cur = last(values);
+      const prev = values[values.length - 13];
+      if (!isFinite(cur) || !isFinite(prev) || prev === 0) return null;
+      return (cur / prev - 1) * 100;
+    }
+
     async function main(){
       const res = await fetch("./data.json", { cache: "no-store" });
+      if (!res.ok) throw new Error("Could not load data.json");
       const data = await res.json();
 
-      const labels = data.labels;
-      const cafe   = data.cafe_index;
-      const cpi    = data.cpi_index;
+      const labels = data.labels || [];
+      const cafe   = data.cafe_index || [];
+      const cpi    = data.cpi_index || [];
+      const base   = data.meta && data.meta.base_date ? data.meta.base_date : (labels[0] || "base");
+      const latestCommon = data.meta && data.meta.latest_common_month ? data.meta.latest_common_month : (last(labels) || "");
 
-      const base = data.meta.base_date;
-      const latest = data.meta.latest_common_month;
+      if (labels.length === 0 || cafe.length === 0 || cpi.length === 0){
+        document.getElementById("warnBox").style.display = "block";
+        document.getElementById("warnBox").textContent = "Data file is empty or missing fields.";
+        return;
+      }
 
       const cafeUp = last(cafe) - 100;
       const cpiUp  = last(cpi) - 100;
       const gap    = last(cafe) - last(cpi);
 
-      document.getElementById("meta").textContent =
-        `Base month ${base}. Latest data shown ${latest}.`;
+      document.getElementById("kpiCafe").textContent = fmtPct(cafeUp);
+      document.getElementById("kpiCpi").textContent  = fmtPct(cpiUp);
+      document.getElementById("kpiGap").textContent  = `${gap.toFixed(1)} pts`;
 
-      document.getElementById("insight").textContent =
-        `Since ${base}, cafe input costs are up ${cafeUp.toFixed(1)} percent while CPI is up ${cpiUp.toFixed(1)} percent. Gap ${gap.toFixed(1)} points.`;
+      const yoyCafe = computeYoY(cafe);
+      const yoyCpi  = computeYoY(cpi);
 
-      const weights = document.getElementById("weights");
-      weights.innerHTML = "";
-      for (const s of data.series){
+      let metaText = `Base month ${base}. Latest month shown ${latestCommon}.`;
+      if (yoyCafe !== null && yoyCpi !== null){
+        metaText += ` Latest 12 month change. Cafe ${yoyCafe.toFixed(1)} percent. CPI ${yoyCpi.toFixed(1)} percent.`;
+      }
+      document.getElementById("metaLine").textContent = metaText;
+
+      const weightsDiv = document.getElementById("weights");
+      weightsDiv.innerHTML = "";
+      for (const s of (data.series || [])){
         const d = document.createElement("div");
         d.className = "pill";
         d.textContent = `${s.name} ${Math.round(s.weight * 100)}%`;
-        weights.appendChild(d);
+        weightsDiv.appendChild(d);
       }
 
-      new Chart(document.getElementById("chart"), {
+      const latestBy = data.meta && data.meta.latest_by_series ? data.meta.latest_by_series : null;
+      if (latestBy){
+        const lines = [];
+        lines.push(`Latest by series`);
+        for (const k of Object.keys(latestBy)){
+          if (latestBy[k]) lines.push(`${k} ${latestBy[k]}`);
+        }
+        document.getElementById("freshness").textContent = lines.join("  |  ");
+      } else {
+        document.getElementById("freshness").textContent = "";
+      }
+
+      const gapSeries = labels.map((_, i) => (cafe[i] - cpi[i]));
+
+      new Chart(document.getElementById("chartMain"), {
         type: "line",
         data: {
           labels,
           datasets: [
-            { label: "Cafe Input Cost Index", data: cafe, tension: 0.25, pointRadius: 0 },
-            { label: "CPI-U All Items", data: cpi, tension: 0.25, pointRadius: 0 }
+            { label: "Cafe Input Cost Index", data: cafe, tension: 0.25, pointRadius: 0, borderWidth: 2 },
+            { label: "CPI U All Items", data: cpi, tension: 0.25, pointRadius: 0, borderWidth: 2 }
           ]
         },
         options: {
+          responsive: true,
           interaction: { mode: "index", intersect: false },
-          plugins: { tooltip: { mode: "index", intersect: false } },
-          scales: { y: { title: { display: true, text: "Index (base = 100)" } } }
+          plugins: {
+            legend: { position: "top" },
+            tooltip: { mode: "index", intersect: false }
+          },
+          scales: {
+            y: { title: { display: true, text: "Index (base = 100)" } },
+            x: { ticks: { maxTicksLimit: 10 } }
+          }
+        }
+      });
+
+      new Chart(document.getElementById("chartGap"), {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            { label: "Cafe minus CPI gap", data: gapSeries, tension: 0.25, pointRadius: 0, borderWidth: 2 }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { position: "top" }
+          },
+          scales: {
+            y: { title: { display: true, text: "Index points" } },
+            x: { ticks: { maxTicksLimit: 10 } }
+          }
         }
       });
     }
 
-    main();
+    main().catch(err => {
+      const box = document.getElementById("warnBox");
+      box.style.display = "block";
+      box.textContent = String(err);
+    });
   </script>
 </body>
 </html>
